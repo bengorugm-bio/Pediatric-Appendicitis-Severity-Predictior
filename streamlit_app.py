@@ -140,7 +140,9 @@ def main():
                         'pediatric_appendicitis_score': pediatric_appendicitis_score
                     }
                     row = [float(mapping.get(c.lower(), 0.0)) for c in cols]
-                    Xs = scaler.transform(np.array([row]))
+                    # Construct a DataFrame with the same column names the scaler was fitted with
+                    df_row = pd.DataFrame([row], columns=cols)
+                    Xs = scaler.transform(df_row)
                 else:
                     Xs = scaler.transform(X)
                 # If the scaler produced a different number of features than the model expects,
@@ -172,11 +174,42 @@ def main():
         st.markdown(f"**Predicted Severity:** {predicted_severity}")
 
         if prediction_proba is not None:
-            proba_df = pd.DataFrame({
-                'Class': severity_encoder.classes_ if severity_encoder is not None else [0,1],
-                'Probability': prediction_proba
-            }).sort_values(by='Probability', ascending=False)
-            proba_df['Probability'] = proba_df['Probability'].apply(lambda x: f"{x*100:.1f}%")
+            # Normalize prediction_proba into a 1D numpy array representing class probabilities
+            probs = np.asarray(prediction_proba)
+            if probs.ndim > 1:
+                # If shape is (1, n_classes) take the first row; otherwise try to ravel
+                if probs.shape[0] == 1:
+                    probs = probs[0]
+                else:
+                    probs = probs.ravel()
+
+            # Determine class labels to align with probabilities
+            if severity_encoder is not None:
+                classes = list(severity_encoder.classes_)
+            elif hasattr(model, 'classes_'):
+                classes = list(model.classes_)
+            else:
+                # fallback to numeric class indices
+                classes = list(range(probs.size))
+
+            # Align lengths: try reshape, pad or trim as last resort to avoid DataFrame length mismatch
+            if probs.size != len(classes):
+                try:
+                    if probs.size == len(classes):
+                        probs = probs.reshape(len(classes))
+                    elif probs.size % len(classes) == 0:
+                        probs = probs.reshape(-1, len(classes))[0]
+                    else:
+                        # pad with zeros or trim to match class count
+                        if probs.size < len(classes):
+                            probs = np.pad(probs, (0, len(classes) - probs.size), constant_values=0.0)
+                        else:
+                            probs = probs[:len(classes)]
+                except Exception:
+                    probs = np.asarray(probs).ravel()[:len(classes)]
+
+            proba_df = pd.DataFrame({'Class': classes, 'Probability': probs}).sort_values(by='Probability', ascending=False)
+            proba_df['Probability'] = proba_df['Probability'].apply(lambda x: f"{float(x) * 100:.1f}%")
             st.dataframe(proba_df, use_container_width=True, hide_index=True)
 
 
