@@ -4,19 +4,17 @@ import joblib
 from pathlib import Path
 
 MODEL_PATH = Path('gb_model.pkl')
-SEX_ENCODER_PATH = Path('sex_encoder.pkl')
 SEVERITY_ENCODER_PATH = Path('severity_encoder.pkl')
 
 @st.cache_resource
 def load_assets():
     try:
         model = joblib.load(MODEL_PATH)
-        sex_encoder = joblib.load(SEX_ENCODER_PATH)
         severity_encoder = joblib.load(SEVERITY_ENCODER_PATH)
-        return model, sex_encoder, severity_encoder
+        return model, severity_encoder
     except FileNotFoundError as e:
         st.error(f"Required file not found: {e.filename}")
-        st.info("Run the training notebook to generate `gb_model.pkl`, `sex_encoder.pkl`, `severity_encoder.pkl`.")
+        st.info("Run the training notebook to generate `gb_model.pkl` and `severity_encoder.pkl`.")
         st.stop()
     except Exception as e:
         st.error(f"Error loading model assets: {e}")
@@ -28,7 +26,7 @@ def main():
     st.title("🏥 Appendicitis Severity Prediction")
     st.markdown("Predicts severity (Complicated vs Uncomplicated) using the trained model.")
 
-    model, sex_encoder, severity_encoder = load_assets()
+    model, severity_encoder = load_assets()
 
     with st.sidebar:
         st.header("Patient Clinical Data")
@@ -45,32 +43,22 @@ def main():
     st.subheader("Prediction Results")
 
     if predict_button:
-        # Encode sex using saved encoder
-        try:
-            sex_encoded = int(sex_encoder.transform([sex])[0])
-        except Exception as e:
-            st.error(f"Error encoding `sex`: {e}")
-            return
-
-        # Map appendix_on_us: LabelEncoder used in training would map 'No'->0 'Yes'->1 (alphabetical),
-        # so use same mapping here
-        appendix_val = 1 if appendix_on_us == 'Yes' else 0
-
-        # Build input DataFrame with same feature names used during training
+        # Build input DataFrame with same feature names used during training.
+        # Pipeline expects raw categorical strings for 'sex' and 'appendix_on_us'.
         input_df = pd.DataFrame({
             'age': [age],
-            'sex_encoded': [sex_encoded],
             'wbc_count': [wbc_count],
             'crp': [crp],
-            'appendix_on_us': [appendix_val],
             'neutrophil_percentage': [neutrophil_percentage],
             'alvarado_score': [alvarado_score],
-            'pediatric_appendicitis_score': [pediatric_appendicitis_score]
+            'pediatric_appendicitis_score': [pediatric_appendicitis_score],
+            'sex': [sex],
+            'appendix_on_us': [appendix_on_us]
         })
 
         try:
             pred_encoded = model.predict(input_df)[0]
-            pred_proba = model.predict_proba(input_df)[0]
+            pred_proba = model.predict_proba(input_df)[0] if hasattr(model, 'predict_proba') else None
             pred_label = severity_encoder.inverse_transform([pred_encoded])[0]
         except Exception as e:
             st.error(f"Prediction error: {e}")
